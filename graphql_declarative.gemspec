@@ -9,8 +9,8 @@ Gem::Specification.new do |spec|
   spec.email = ["37406243+RajuRajan@users.noreply.github.com"]
 
   spec.summary = "Declarative filtering, sorting, cursor pagination, and preloading for graphql-ruby resolvers."
-  spec.description = "Declare filtering, sorting, cursor pagination, and preloading on a graphql-ruby "\
-    "resolver instead of hand-writing them per endpoint. Pagination stays correct through "\
+  spec.description = "Declare filtering, sorting, cursor pagination, and preloading on a graphql-ruby " \
+    "resolver instead of hand-writing them per endpoint. Pagination stays correct through " \
     "association filters, and preloading is derived from the query's selection set."
   spec.homepage = "https://github.com/RajuRajan/graphql_declarative"
   spec.license = "MIT"
