@@ -103,6 +103,43 @@ RSpec.describe "integration" do
     end
   end
 
+  # A second, minimal schema over `Article` (spec/support/schema.rb), whose
+  # `subtitle` column is nullable on purpose. `sortable_by` only checks that
+  # the column exists (SPEC.md §6.7); nothing at class-definition or
+  # GraphQL-validation time checks NOT NULL, so a client picking `SUBTITLE`
+  # from a legally-declared enum is exactly how a real app would trip this —
+  # not a contrived unit call.
+  def null_sort_schema
+    return self.class.const_get(:NULL_SORT_SCHEMA) if self.class.const_defined?(:NULL_SORT_SCHEMA)
+
+    article_type = Class.new(GraphQL::Schema::Object) do
+      graphql_name "IntegrationArticle"
+      field :id, GraphQL::Types::ID, null: false
+      field :title, GraphQL::Types::String
+      field :subtitle, GraphQL::Types::String
+    end
+
+    articles_resolver = Class.new(GraphqlDeclarative::Resolver) do
+      graphql_name "IntegrationArticlesResolver"
+      type article_type.connection_type, null: false
+      sortable_by :subtitle
+      paginate default_page_size: 5
+
+      def base_scope
+        Article.all
+      end
+    end
+
+    query = Class.new(GraphQL::Schema::Object) do
+      graphql_name "IntegrationArticleQuery"
+      field :articles, resolver: articles_resolver
+    end
+
+    schema = Class.new(GraphQL::Schema) { query query }
+    self.class.const_set(:NULL_SORT_SCHEMA, schema)
+    schema
+  end
+
   # -------------------------------------------------------------------------
 
   let(:full_query) do
@@ -271,19 +308,153 @@ RSpec.describe "integration" do
     end
 
     it "for an unknown filter argument, at validation time" do
+      # This is graphql-ruby's OWN input-object validation, not the gem's:
+      # `filter_class.filter :title, ...` declares both the GraphQL argument
+      # AND the Filter::definitions entry from the same call, so a key that
+      # isn't a declared GraphQL argument can never reach Filter.apply in a
+      # correctly-declared resolver — it is rejected here, one layer up.
+      # Proof: delete Filter's own "unknown filter argument" raise
+      # (filter.rb) and this example still passes just as happily, because
+      # execution never gets past validation. It stays as documentation of
+      # that outer layer; the assertion below is the one that actually
+      # exercises Filter.apply's own defense.
       result = self.class.const_get(:SCHEMA).execute(
         '{ courses(filter: {nonexistent: "x"}) { edges { node { title } } } }'
       )
 
       expect(result["errors"]).not_to be_empty
+
+      # The gem's own guard, reached directly the way `Resolver#resolve` would
+      # reach it if it were ever handed a filter hash GraphQL validation did
+      # not already sanitize (a non-GraphQL caller, or a future input type
+      # that is looser than the current one). Uses the exact `course_filter`
+      # wired into this schema's resolver, not a fresh double. Delete the
+      # raise at filter.rb's `unless definition` check and THIS assertion
+      # fails.
+      expect { GraphqlDeclarative::Filter.apply(Course.all, course_filter, nonexistent: "x") }
+        .to raise_error(GraphqlDeclarative::Error, /unknown filter argument/)
     end
 
     it "for an unsortable field, at validation time" do
+      # Same shape as above: `sortable_by :title, :created_at` builds the
+      # `sortBy` enum FROM the whitelist, so a value that parses as that enum
+      # is, by construction, always in the whitelist — Sort.resolve_field's
+      # "not sortable" raise can never fire from a value that survived this
+      # validation. Proof: delete Sort's "is not sortable" raise (sort.rb) and
+      # this example still passes unchanged.
       result = self.class.const_get(:SCHEMA).execute(
         "{ courses(sortBy: PUBLISHED) { edges { node { title } } } }"
       )
 
       expect(result["errors"]).not_to be_empty
+
+      # The gem's own guard, reached directly with the exact whitelist this
+      # schema's resolver declares. Delete Sort's "is not sortable" raise and
+      # THIS assertion fails.
+      expect {
+        GraphqlDeclarative::Sort.apply(Course.all, allowed: courses_resolver.sortable_fields, field: "published")
+      }.to raise_error(GraphqlDeclarative::Error, /"published" is not sortable/)
+    end
+
+    it "for a NULL-able sort column, at request time — not validation time" do
+      # Unlike the two cases above, THIS raise genuinely is reachable through
+      # a full GraphQL request: `sortable_by` only requires the column to
+      # exist, not to be NOT NULL, so a resolver can legally declare a
+      # nullable column and a client can legally pick it — validation cannot
+      # catch this one, only Sort.resolve_field can (SPEC.md §6.4).
+      Article.create!(title: "A", subtitle: nil)
+
+      result = null_sort_schema.execute("{ articles(first: 5, sortBy: SUBTITLE) { edges { node { title } } } }")
+
+      expect(result["errors"]).not_to be_empty
+      expect(result["errors"].first["message"]).to match(/allows NULL/)
+    end
+  end
+
+  describe "backward pagination (last:/before:) is rejected, not silently wrong" do
+    before { seed(4) }
+
+    it "rejects last: alone" do
+      result = self.class.const_get(:SCHEMA).execute("{ courses(last: 2) { edges { node { title } } } }")
+
+      expect(result["errors"]).not_to be_empty
+      expect(result["errors"].first["message"]).to match(/backward pagination/i)
+    end
+
+    it "rejects before: alone" do
+      junk_cursor = GraphqlDeclarative::Cursor.encode(sort_value: "Course 01", id: 1)
+      result = self.class.const_get(:SCHEMA).execute(
+        "{ courses(before: \"#{junk_cursor}\") { edges { node { title } } } }"
+      )
+
+      expect(result["errors"]).not_to be_empty
+      expect(result["errors"].first["message"]).to match(/backward pagination/i)
+    end
+
+    it "rejects last: and before: together rather than returning a plausible-looking page" do
+      page1 = execute("{ courses(first: 2, sortBy: TITLE) { edges { cursor node { title } } } }")
+      cursor = page1.dig("data", "courses", "edges").last["cursor"]
+
+      result = self.class.const_get(:SCHEMA).execute(<<~GQL)
+        { courses(last: 2, before: "#{cursor}", sortBy: TITLE) { edges { node { title } } } }
+      GQL
+
+      expect(result["errors"]).not_to be_empty
+      expect(result["errors"].first["message"]).to match(/backward pagination/i)
+      # And, critically, it must not have quietly returned every row instead.
+      expect(result["data"]).to be_nil
+    end
+  end
+
+  describe "first: 0 is an empty page (Relay), first: negative is an error" do
+    before { seed(3) }
+
+    it "returns an empty page for first: 0 rather than erroring" do
+      # The Relay Cursor Connections spec treats first: 0 as valid and only a
+      # negative value as an error, so this must NOT raise.
+      result = self.class.const_get(:SCHEMA).execute(
+        "{ courses(first: 0) { pageInfo { hasNextPage endCursor } edges { node { title } } } }"
+      )
+
+      expect(result["errors"]).to be_nil
+      expect(result.dig("data", "courses", "edges")).to eq([])
+    end
+
+    it "reports hasNextPage true with no endCursor for first: 0, and that is honest" do
+      # Rows exist, so hasNextPage is true; edges is empty, so there is no
+      # endCursor to advance from. A client looping on hasNextPage while asking
+      # for zero rows does not progress — but that is the client asking for no
+      # rows, not the connection claiming a page it cannot hand over. This spec
+      # exists so the behaviour is a recorded decision, not an accident.
+      result = self.class.const_get(:SCHEMA).execute(
+        "{ courses(first: 0) { pageInfo { hasNextPage endCursor } edges { cursor } } }"
+      )
+
+      expect(result.dig("data", "courses", "pageInfo", "hasNextPage")).to be(true)
+      expect(result.dig("data", "courses", "pageInfo", "endCursor")).to be_nil
+    end
+
+    it "reports hasNextPage false for first: 0 when nothing matches" do
+      Course.delete_all
+
+      result = self.class.const_get(:SCHEMA).execute(
+        "{ courses(first: 0) { pageInfo { hasNextPage } edges { cursor } } }"
+      )
+
+      expect(result.dig("data", "courses", "pageInfo", "hasNextPage")).to be(false)
+    end
+
+    it "rejects a negative first:" do
+      result = self.class.const_get(:SCHEMA).execute("{ courses(first: -1) { edges { node { title } } } }")
+
+      expect(result["errors"]).not_to be_empty
+      expect(result["errors"].first["message"]).to match(/first:/)
+    end
+
+    it "first: 1 still works" do
+      result = execute("{ courses(first: 1) { edges { node { title } } } }")
+
+      expect(result.dig("data", "courses", "edges").size).to eq(1)
     end
   end
 

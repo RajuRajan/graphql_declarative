@@ -135,8 +135,12 @@ RSpec.describe GraphqlDeclarative::KeysetConnection do
         expect(described_class.page_size_for(default_page_size: 25, max_page_size: 100)).to eq(25)
       end
 
-      it "never returns a negative size" do
-        expect(described_class.page_size_for(first: -3)).to eq(0)
+      it "raises rather than silently clamping a negative first: to 0" do
+        # A page_size of 0 would still fetch page_size + 1 == 1 row, report
+        # has_next_page: true off that extra row, and trim nodes to [] — a
+        # page with no rows and no cursor to advance from. Reject instead.
+        expect { described_class.page_size_for(first: -3) }
+          .to raise_error(GraphQL::ExecutionError, /first:/)
       end
     end
   end
@@ -154,13 +158,31 @@ RSpec.describe GraphqlDeclarative::KeysetConnection do
         .to eq(sort_value: "Alpha", id: alpha.id)
     end
 
-    it "gives the same row the same cursor regardless of its position" do
-      # The property offsets do not have, and the reason stability_spec.rb
-      # passes. `beta` is at index 1 in one relation and index 0 in the other.
-      full = connection(Course.order(:title), sort_column: :title)
-      partial = connection(Course.where(title: "Beta").order(:title), sort_column: :title)
+    it "is a pure function of the item, not of the item's position in `nodes`" do
+      # `cursor_for(item)` reads only `item[sort_column]` and `item.id` — it
+      # never consults `nodes`/`items` at all, which is the actual property
+      # that makes keyset cursors position-independent (see stability_spec.rb
+      # for the end-to-end proof under concurrent writes). A test that just
+      # compares two connections built from relations where `beta` happens to
+      # carry the same title/id in both cannot fail: cursor_for would return
+      # the same string even if a regression made it read from `nodes` again,
+      # as long as `beta` were still IN `nodes` at the same computed offset.
+      #
+      # This instead calls cursor_for on a row that both connections show is
+      # NOT present in their own `nodes` — `beta`'s "position" is nil in each
+      # — and still gets the correct, matching cursor. A regression that
+      # reintroduced an offset (e.g. `nodes.index(item)`) would return a
+      # cursor built from a nil/garbage offset here, or raise, not the real
+      # (title, id) tuple.
+      empty = connection(Course.where(title: "nowhere"), sort_column: :title)
+      other_page = connection(Course.where(title: "Alpha").order(:title), sort_column: :title)
 
-      expect(full.cursor_for(beta)).to eq(partial.cursor_for(beta))
+      expect(empty.nodes).to eq([])
+      expect(other_page.nodes.map(&:id)).not_to include(beta.id)
+
+      expected = GraphqlDeclarative::Cursor.encode(sort_value: "Beta", id: beta.id)
+      expect(empty.cursor_for(beta)).to eq(expected)
+      expect(other_page.cursor_for(beta)).to eq(expected)
     end
 
     it "defaults the sort column to :id" do

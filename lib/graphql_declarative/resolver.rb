@@ -238,6 +238,8 @@ module GraphqlDeclarative
       model = scope.klass
 
       begin
+        reject_backward_pagination!(args)
+
         scope = Filter.apply(scope, self.class.filter_class, args[:filter])
 
         direction = normalize_direction(args[:sort_direction])
@@ -318,6 +320,30 @@ module GraphqlDeclarative
         sort_value: payload[:sort_value],
         id: payload[:id]
       )
+    end
+
+    # SPEC.md §3: v0.1.0 is forward-only, and that limit must be documented,
+    # "not hidden" — a request that asks for backward pagination must fail
+    # loudly rather than return a plausible-looking wrong page.
+    #
+    # graphql-ruby's ConnectionExtension publishes `last:`/`before:` on every
+    # field whose return type is a Connection (field/connection_extension.rb);
+    # that decision is made by the owning field from the return type, not by
+    # this resolver's own `argument` declarations, so there is no clean way
+    # for a Resolver subclass to stop graphql-ruby from offering them (see the
+    # note in FINDING 2's fix for the alternative considered and rejected).
+    # ConnectionExtension also strips :first/:last/:before/:after out of the
+    # keyword arguments it hands to `resolve` — the same mechanism
+    # `pagination_argument` already uses to recover `after:` — so `last:`/
+    # `before:` must be read back the same way to be seen at all.
+    def reject_backward_pagination!(args)
+      last = pagination_argument(args, :last)
+      before = pagination_argument(args, :before)
+      return if last.nil? && before.nil?
+
+      raise Error,
+        "backward pagination (last:/before:) is not supported in v0.1.0 — " \
+        "this connection is forward-only. Use first:/after: instead (SPEC.md section 3)."
     end
 
     def normalize_direction(value)

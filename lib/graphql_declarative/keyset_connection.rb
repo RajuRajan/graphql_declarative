@@ -59,11 +59,34 @@ module GraphqlDeclarative
 
     # The limit a caller must use if it wants to fetch the page itself:
     # page_size + 1 rows, where the +1 is what makes has_next_page free.
+    #
+    # `first: 0` returns an empty page (Relay-conformant); only a negative
+    # `first:` is an error. The subtlety this class must not repeat: clamping a
+    # negative to 0 would let `load_page` fetch 1 row, report `has_next_page:
+    # true` off it, and trim `nodes` to `[]` — a page with no rows and no
+    # cursor, since `endCursor` is nil when `nodes` is empty. graphql-ruby's own
+    # RelationConnection avoids the whole question because `Connection#first`
+    # clamps through `limit_pagination_argument`; this class bypasses that by
+    # reading `first_value` (the raw, unclamped value) directly, so it validates
+    # the bound itself.
     def self.page_size_for(first: nil, default_page_size: nil, max_page_size: nil)
+      # The Relay Cursor Connections spec treats first: 0 as valid — an empty
+      # page — and only a negative value as an error, so this returns 0 rather
+      # than raising. Note what that means: load_page fetches page_size + 1 == 1
+      # row, so hasNextPage is true whenever any row matches, with no endCursor
+      # to advance from. That is Relay-conformant, and a client that loops on
+      # hasNextPage while asking for first: 0 will not progress — but that is
+      # the client asking for no rows, not the connection misreporting.
+      if first&.negative?
+        raise GraphQL::ExecutionError,
+          "first: must not be negative (got #{first.inspect}). Omit first: to use the default " \
+          "page size."
+      end
+      return 0 if first == 0
+
       requested = first || default_page_size || DEFAULT_PAGE_SIZE
       max = max_page_size || MAX_PAGE_SIZE
-      size = [requested, max].min
-      (size < 0) ? 0 : size
+      [requested, max].min
     end
 
     # [first || default_page_size, max_page_size].min. A `first:` above

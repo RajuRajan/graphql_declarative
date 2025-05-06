@@ -13,7 +13,7 @@ ActiveRecord::Schema.define do
   end
 
   create_table :courses, force: true do |t|
-    t.string :title
+    t.string :title, null: false
     t.boolean :published, default: false
     t.references :author
     t.timestamps
@@ -23,6 +23,26 @@ ActiveRecord::Schema.define do
     t.references :course
     t.string :status          # "active" | "cancelled"
     t.timestamps
+  end
+
+  # Nullable sortable column, on purpose — SPEC.md §6.4/§6.3 require
+  # `sortable_by` columns to be NOT NULL and Sort.apply must raise rather than
+  # let rows with a NULL sort value silently vanish mid-pagination. `subtitle`
+  # is deliberately left nullable so sort_spec.rb can exercise that raise
+  # against a real column, not a mocked one.
+  create_table :articles, force: true do |t|
+    t.string :title, null: false
+    t.string :subtitle # nullable: this is the point of the fixture
+    t.timestamps
+  end
+
+  # Non-`id` primary key, on purpose — SPEC.md §6.3/§6.4 require Sort's ORDER
+  # BY tiebreaker and Cursor's seek predicate to agree on `model.primary_key`,
+  # whatever it is named. `id: false` + a `uuid` primary key is the minimal
+  # fixture that would break a hardcoded `:id` tiebreaker.
+  create_table :widgets, id: false, force: true do |t|
+    t.string :uuid, null: false
+    t.string :name, null: false
   end
 end
 
@@ -37,4 +57,11 @@ end
 
 class Enrollment < ActiveRecord::Base
   belongs_to :course
+end
+
+class Article < ActiveRecord::Base
+end
+
+class Widget < ActiveRecord::Base
+  self.primary_key = "uuid"
 end

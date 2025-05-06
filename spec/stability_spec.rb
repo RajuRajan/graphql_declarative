@@ -158,7 +158,13 @@ RSpec.describe "cursor stability under concurrent writes" do
       cursor = nil
       inserted = false
 
-      loop do
+      # Bounded, not `loop do ... end`: a keyset regression (an offset cursor, or
+      # a `>=` tiebreaker) makes an unbounded walk never terminate, so CI reports
+      # a HUNG JOB instead of a red build. The cap is deliberately generous —
+      # far above the 6 pages this can legitimately need — so it only ever trips
+      # on a genuine non-termination bug.
+      max_pages = 20
+      max_pages.times do
         page = keyset(first: 2, after: cursor)
         break if page[:titles].empty?
 
@@ -175,6 +181,7 @@ RSpec.describe "cursor stability under concurrent writes" do
       # has already passed that point is not supposed to go back for it. What
       # matters is that nothing is repeated and nothing originally present is
       # skipped.
+      expect(seen.size).to be < max_pages * 2, "walk did not terminate — keyset regression"
       expect(seen).to eq(%w[B D F H J L])
       expect(seen.uniq).to eq(seen)
     end

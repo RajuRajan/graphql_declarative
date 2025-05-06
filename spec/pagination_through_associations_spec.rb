@@ -61,11 +61,44 @@ RSpec.describe "pagination through association filters" do
   end
 
   it "does not skip records across pages" do
-    page1 = filtered.order(:id).limit(2).to_a
-    cursor = page1.last.id
-    page2 = filtered.order(:id).where("courses.id > ?", cursor).limit(2).to_a
+    # The real gem pagination path — Sort.apply + Cursor.encode/decode/seek —
+    # not a hand-rolled `where("courses.id > ?", ...)`. A hand-rolled seek
+    # would still pass even if Cursor.seek itself built the wrong predicate
+    # (e.g. forgot the tiebreaker, or used the wrong comparison operator for
+    # the direction), because it never calls that code. Walking every page in
+    # page_size 1 (not just two pages) also proves the walk holds all the way
+    # to the end, not just once.
+    allowed = []
+    column = GraphqlDeclarative::Sort.column_for(filtered, allowed: allowed, field: nil)
+    sorted = GraphqlDeclarative::Sort.apply(filtered, allowed: allowed, field: nil, direction: :asc)
 
-    expect((page1 + page2).map(&:id)).to eq(courses.map(&:id))
+    seen = []
+    cursor_after = nil
+
+    # Bounded, not `loop do ... end`: a broken seek predicate (e.g. `>=`
+    # instead of `>` on the tiebreaker) can make the same row match forever,
+    # which must show up as a *failing* assertion below, not a hung suite.
+    (courses.size + 1).times do
+      page = if cursor_after
+        decoded = GraphqlDeclarative::Cursor.decode(cursor_after)
+        GraphqlDeclarative::Cursor.seek(
+          sorted, column: column, direction: :asc,
+          sort_value: decoded[:sort_value], id: decoded[:id]
+        ).limit(1).to_a
+      else
+        sorted.limit(1).to_a
+      end
+
+      break if page.empty?
+
+      record = page.first
+      seen << record.id
+      cursor_after = GraphqlDeclarative::Cursor.encode(
+        sort_value: record.public_send(column), id: record.id
+      )
+    end
+
+    expect(seen).to eq(courses.map(&:id))
   end
 
   it "counts each matching record once" do

@@ -89,6 +89,13 @@ RSpec.describe GraphqlDeclarative::Cursor do
     end
 
     it "round-trips a datetime through a real column value" do
+      # Sub-second precision is the whole point of this spec (see the header
+      # comment on TIME_PRECISION in cursor.rb) — two rows created in the same
+      # second must not compare equal to a cursor built from one of them.
+      # Asserting only `.to_i` equality is exactly the second-level truncation
+      # this test exists to rule out: reintroduce it (e.g. set
+      # Cursor::TIME_PRECISION to 0) and a `.to_i` assertion still passes,
+      # because `.to_i` throws away the same precision the bug throws away.
       course = Course.create!(title: "T", created_at: Time.utc(2024, 6, 1, 12, 30, 45, 654_321))
       course.reload
       type = Course.type_for_attribute("created_at")
@@ -98,7 +105,8 @@ RSpec.describe GraphqlDeclarative::Cursor do
         type: type
       )
 
-      expect(payload[:sort_value].to_i).to eq(course.created_at.to_i)
+      expect(payload[:sort_value].usec).to eq(course.created_at.usec)
+      expect(payload[:sort_value].to_f).to be_within(0.000001).of(course.created_at.to_f)
       expect(payload[:id]).to eq(course.id)
     end
   end
