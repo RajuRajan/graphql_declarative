@@ -28,6 +28,7 @@ end
 
 class Author < ActiveRecord::Base; has_many :courses; end
 class Enrollment < ActiveRecord::Base; belongs_to :course; end
+
 class Course < ActiveRecord::Base
   belongs_to :author, optional: true
   has_many :enrollments
@@ -46,7 +47,7 @@ end
 def count_queries
   n = 0
   sub = ActiveSupport::Notifications.subscribe("sql.active_record") do |*, payload|
-    n += 1 unless payload[:name].to_s =~ /SCHEMA|TRANSACTION/
+    n += 1 unless /SCHEMA|TRANSACTION/.match?(payload[:name].to_s)
   end
   yield
   n
