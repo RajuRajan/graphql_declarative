@@ -48,7 +48,7 @@ GEM
     minitest (6.0.6)
       drb (~> 2.0)
       prism (~> 1.5)
-    parallel (2.1.0)
+    parallel (2.0.1)
     parser (3.3.12.0)
       ast (~> 2.4.1)
       racc
@@ -134,6 +134,7 @@ PLATFORMS
 
 DEPENDENCIES
   graphql_declarative!
+  parallel (< 2.1)
   rake (~> 13.0)
   rspec (~> 3.13)
   sqlite3 (~> 2.0)
