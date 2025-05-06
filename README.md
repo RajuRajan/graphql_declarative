@@ -12,11 +12,6 @@ Two of those bugs are not tedium. They are correctness failures that most
 implementations ship, and both are invisible in a test suite with static
 fixtures.
 
-<!-- TODO(raja): one paragraph in your own voice on WHY you built this — the
-     production experience behind it. This is the paragraph people believe or
-     don't. Keep it factual and first-person; do not claim employer work as
-     this gem's code. -->
-
 ## Before
 
 ```ruby
@@ -118,10 +113,6 @@ Row-value comparison is deliberately avoided; SQLite and MySQL support varies.
 Proof: [`spec/stability_spec.rb`](spec/stability_spec.rb) — paginate, insert a row
 before the current page, then fetch page 2. The keyset walk returns each record
 exactly once; the offset walk repeats one.
-
-<!-- TODO(raja): if you have a production war story about either failure mode,
-     two sentences here is worth more than the rest of this README. Only if it
-     is genuinely yours. -->
 
 ## Preloading
 
