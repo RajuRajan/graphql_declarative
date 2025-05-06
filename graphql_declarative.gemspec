@@ -6,7 +6,7 @@ Gem::Specification.new do |spec|
   spec.name = "graphql_declarative"
   spec.version = GraphqlDeclarative::VERSION
   spec.authors = ["Raja Rajan"]
-  spec.email = ["37406243+RajuRajan@users.noreply.github.com"]
+  spec.email = ["rajuart678@gmail.com"]
 
   spec.summary = "Declarative filtering, sorting, cursor pagination, and preloading for graphql-ruby resolvers."
   spec.description = "Declare filtering, sorting, cursor pagination, and preloading on a graphql-ruby " \
