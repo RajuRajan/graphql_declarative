@@ -31,10 +31,26 @@ RSpec.describe "pagination through association filters" do
     end
   end
 
+  # The declaration. `through: :enrollments` is what makes this a has_many
+  # filter; `column: :status` names the column on the ENROLLMENTS table. Both
+  # identifiers come from here and only from here (SPEC.md 7).
+  let(:filter_class) do
+    Class.new(GraphqlDeclarative::FilterInput) do
+      graphql_name "PaginationContractCourseFilter"
+      filter :enrollment_status, :string, through: :enrollments, column: :status, ops: [:eq]
+    end
+  end
+
+  # The real thing. Filter.apply resolves the association filter to
+  # `WHERE courses.id IN (SELECT ...)`, so `filtered` is an un-joined relation
+  # over courses -- one row per course, whatever the enrollment counts are.
   let(:filtered) do
-    # TODO: replace with the gem's filter application once implemented, e.g.
-    #   GraphqlDeclarative::Filter.apply(Course.all, enrollments_status: "active")
-    Course.all
+    GraphqlDeclarative::Filter.apply(Course.all, filter_class, enrollment_status: "active")
+  end
+
+  it "does not join the relation it hands back" do
+    expect(filtered.joins_values).to be_empty
+    expect(filtered.to_sql).to match(/"courses"\."id" IN \(SELECT/)
   end
 
   it "returns a full page of DISTINCT records" do
