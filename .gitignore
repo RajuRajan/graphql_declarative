@@ -10,3 +10,7 @@
 # rspec failure tracking
 .rspec_status
 gemfiles/*.lock
+
+# Built gem artifacts — never commit these; spec.files uses `git ls-files`,
+# so a committed .gem makes the gemspec contain itself and become invalid.
+*.gem
