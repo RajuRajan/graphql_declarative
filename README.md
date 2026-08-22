@@ -1,5 +1,8 @@
 # graphql_declarative
 
+[![Gem Version](https://badge.fury.io/rb/graphql_declarative.svg)](https://rubygems.org/gems/graphql_declarative)
+[![CI](https://github.com/RajuRajan/graphql_declarative/actions/workflows/main.yml/badge.svg)](https://github.com/RajuRajan/graphql_declarative/actions/workflows/main.yml)
+
 Declarative filtering, sorting, cursor pagination and preloading for
 [graphql-ruby](https://github.com/rmosolgo/graphql-ruby) resolvers.
 
@@ -145,7 +148,8 @@ raises rather than reaching SQL.
 gem "graphql_declarative"
 ```
 
-Requires Ruby >= 3.0, graphql ~> 2.0, ActiveRecord >= 6.1. Tested against
+Requires Ruby >= 3.2, graphql ~> 2.0, ActiveRecord >= 7.0 (< 9.0). Every
+Ruby/ActiveRecord combination in that range is exercised by CI. Tested against
 PostgreSQL, MySQL and SQLite.
 
 ## API
