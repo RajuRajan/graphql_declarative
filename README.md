@@ -70,8 +70,14 @@ No `resolve`. You declare what is allowed; the gem builds the query.
 `joins` multiplies rows. A course with 3 matching enrollments occupies 3 rows, so
 `LIMIT 25` returns fewer than 25 distinct courses, and a cursor taken from the
 last row points into the middle of a duplicate run — page 2 skips records that
-were never shown. `DISTINCT` fixes the count but breaks `ORDER BY` on a joined
-column and still cannot produce a stable cursor.
+were never shown.
+
+`DISTINCT` is not the answer either. It does return a correct page when you sort
+by a base-table column, but it forces the database to build the whole joined
+result, dedupe it and sort it before `LIMIT` can apply - on a large table that is
+the entire join, every request. It also rejects `ORDER BY` on a joined column,
+since the sort expression is not in the DISTINCT set, and fails outright on
+`json` columns, which have no equality operator to dedupe on.
 
 Four courses with 3, 1, 2 and 1 active enrollments, page size 2:
 

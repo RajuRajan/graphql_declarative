@@ -18,8 +18,10 @@ implementations ship:
 A course with 3 matching enrollments occupies 3 rows, so `LIMIT 25` returns fewer
 than 25 distinct courses and a cursor taken from the last row points into the
 middle of a duplicate run — page 2 skips records that were never shown.
-`DISTINCT` fixes the count but breaks `ORDER BY` on a joined column and still
-cannot produce a stable cursor.
+`DISTINCT` returns a correct page when sorting by a base-table column, but it
+forces the database to materialise and dedupe the entire joined result before
+`LIMIT` applies, rejects `ORDER BY` on a joined column, and fails on `json`
+columns. Correct but slow and fragile; the subquery is correct and indexable.
 
 **(b) graphql-ruby's own cursors are offsets.** `GraphQL::Pagination::RelationConnection#cursor_for`
 (relation_connection.rb:47) encodes `offset.to_s`. If a row is inserted or deleted
@@ -327,7 +329,7 @@ install → API reference), reproducible benchmark in `bench/`, CI green on Ruby
 
 | Decision | Why | Reconsider if |
 |---|---|---|
-| id subquery, not `DISTINCT` | `DISTINCT` breaks `ORDER BY` on joined columns and gives no stable cursor | never |
+| id subquery, not `DISTINCT` | `DISTINCT` must materialise and dedupe the whole join before LIMIT, breaks `ORDER BY` on joined columns, and fails on json columns | never |
 | Keyset, not offset cursors | offsets shift under concurrent writes | never |
 | Forward-only pagination | `before:`/`last:` doubles the cursor logic for little use | users ask |
 | One subquery per association | "one child satisfies all predicates" is the intuitive reading | users ask for the other |
